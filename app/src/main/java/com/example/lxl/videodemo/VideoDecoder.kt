@@ -7,21 +7,26 @@ import android.view.Surface
 
 class VideoDecoder(val surface: Surface, val path: String) {
 
-    lateinit var extractor: MediaExtractor
-    lateinit var decoder: MediaCodec
+    lateinit var videoExtractor: MediaExtractor
+    lateinit var videoDecoder: MediaCodec
 
     init {
+        initVideo()
+        initAudio()
+    }
+
+    private fun initVideo() {
         try {
-            extractor = MediaExtractor()
-            extractor.setDataSource(path)
-            for (i in 0..(extractor.trackCount - 1)) {
-                val mediaFormat = extractor.getTrackFormat(i)
+            videoExtractor = MediaExtractor()
+            videoExtractor.setDataSource(path)
+            for (i in 0..(videoExtractor.trackCount - 1)) {
+                val mediaFormat = videoExtractor.getTrackFormat(i)
                 val mime = mediaFormat.getString(MediaFormat.KEY_MIME)
                 if (mime.startsWith("video/")) {
-                    extractor.selectTrack(i)
-                    decoder = MediaCodec.createDecoderByType(mime)
-                    decoder.configure(mediaFormat, surface, null, 0)
-                    decoder.start()
+                    videoExtractor.selectTrack(i)
+                    videoDecoder = MediaCodec.createDecoderByType(mime)
+                    videoDecoder.configure(mediaFormat, surface, null, 0)
+                    videoDecoder.start()
                 }
             }
         } catch (e: Throwable) {
@@ -29,17 +34,36 @@ class VideoDecoder(val surface: Surface, val path: String) {
         }
     }
 
+    private fun initAudio() {
+
+    }
+
     fun start() {
+        Thread {
+            playVideo()
+        }.start()
+
+        Thread {
+            playAudio()
+        }.start()
+    }
+
+    private fun playAudio() {
+
+    }
+
+
+    private fun playVideo() {
         var playEnd = false
         var eos = false
         val startMillis = System.currentTimeMillis()
         while (!playEnd) {
             if (!eos) {
-                // extractor frame and put it into decoder
-                eos = decodeFrame(decoder, extractor)
+                // videoExtractor frame and put it into videoDecoder
+                eos = decodeFrame(videoDecoder, videoExtractor)
             }
             val bufferInfo = MediaCodec.BufferInfo()
-            val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, -1)
+            val outputIndex = videoDecoder.dequeueOutputBuffer(bufferInfo, -1)
             when (outputIndex) {
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
                 MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED,
@@ -51,14 +75,14 @@ class VideoDecoder(val surface: Surface, val path: String) {
                         playEnd = true
                     } else {
                         delay(bufferInfo, startMillis)
-                        decoder.releaseOutputBuffer(outputIndex, true)
+                        videoDecoder.releaseOutputBuffer(outputIndex, true)
                     }
                 }
             }
         }
-        decoder.stop()
-        decoder.release()
-        extractor.release()
+        videoDecoder.stop()
+        videoDecoder.release()
+        videoExtractor.release()
     }
 
     private fun delay(bufferInfo: MediaCodec.BufferInfo, startMillis: Long) {

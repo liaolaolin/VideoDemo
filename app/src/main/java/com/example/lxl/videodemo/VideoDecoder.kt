@@ -1,16 +1,25 @@
 package com.example.lxl.videodemo
 
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.view.Surface
+import android.media.*
+import java.io.IOException
+import android.media.MediaCodec
+import android.util.Log
+import android.media.MediaExtractor
+
 
 class VideoDecoder(val surface: Surface, val path: String) {
+
+    val TAG = "VideoDecoder"
 
     lateinit var videoExtractor: MediaExtractor
     lateinit var videoDecoder: MediaCodec
     lateinit var audioExtractor: MediaExtractor
     lateinit var audioDecoder: MediaCodec
+    lateinit var audioTrack: AudioTrack
+    private var audioInputBufferSize = 0
+
+    private val TIMEOUT_US = 30 * 1000L
 
     init {
         initVideo()
@@ -45,7 +54,40 @@ class VideoDecoder(val surface: Surface, val path: String) {
                 val mime = mediaFormat.getString(MediaFormat.KEY_MIME)
                 if (mime.startsWith("audio/")) {
                     audioExtractor.selectTrack(i)
+                    val audioChannels = mediaFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    val audioSampleRate = mediaFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    val minBufferSize = AudioTrack.getMinBufferSize(
+                        audioSampleRate,
+                        if (audioChannels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO,
+                        AudioFormat.ENCODING_PCM_16BIT
+                    )
+                    val maxInputSize = mediaFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                    audioInputBufferSize = if (minBufferSize > 0) minBufferSize * 4 else maxInputSize
+                    val frameSizeInBytes = audioChannels * 2
+                    audioInputBufferSize = audioInputBufferSize / frameSizeInBytes * frameSizeInBytes
+                    audioTrack = AudioTrack(
+                        AudioManager.STREAM_MUSIC,
+                        audioSampleRate,
+                        if (audioChannels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        audioInputBufferSize,
+                        AudioTrack.MODE_STREAM
+                    )
+                    audioTrack.setVolume(1f)
+                    audioTrack.play()
+                    try {
+                        audioDecoder = MediaCodec.createDecoderByType(mime)
+                        audioDecoder.configure(mediaFormat, null, null, 0)
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                    }
 
+                    if (audioDecoder == null) {
+                        return
+                    }
+                    audioDecoder.start()
+
+                    break
                 }
             }
         } catch (e: Throwable) {
@@ -64,7 +106,68 @@ class VideoDecoder(val surface: Surface, val path: String) {
     }
 
     private fun playAudio() {
+        val buffers = audioDecoder.getOutputBuffers()
+        var sz = buffers[0].capacity()
+        if (sz <= 0) {
+            sz = audioInputBufferSize
+        }
+        var mAudioOutTempBuf = ByteArray(sz)
 
+        val audioBufferInfo = MediaCodec.BufferInfo()
+        var playEnd = false
+        var eos = false
+        val startMillis = System.currentTimeMillis()
+        var outputBuffers = audioDecoder.getOutputBuffers()
+        while (!playEnd) {
+            // 解码
+            if (!eos) {
+                eos = decodeFrame(audioDecoder, audioExtractor)
+            }
+            // 获取解码后的数据
+            val outputBufferIndex = audioDecoder.dequeueOutputBuffer(audioBufferInfo, TIMEOUT_US) // 这里不能用-1，有些视频是需要积累几帧才能解出数据的，妈蛋
+            when (outputBufferIndex) {
+                MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
+                MediaCodec.INFO_TRY_AGAIN_LATER -> { }
+                MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> {
+                    outputBuffers = audioDecoder.getOutputBuffers()
+                    Log.i(TAG, "INFO_OUTPUT_BUFFERS_CHANGED")
+                }
+                else -> {
+                    if (audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        playEnd = true
+                    } else {
+                        outputBuffers[outputBufferIndex]?.let { outputBuffer ->
+                            // 延时解码，跟视频时间同步
+                            delay(audioBufferInfo, startMillis)
+                            // 如果解码成功，则将解码后的音频PCM数据用AudioTrack播放出来
+                            if (audioBufferInfo.size > 0) {
+                                if (mAudioOutTempBuf.size < audioBufferInfo.size) {
+                                    mAudioOutTempBuf = ByteArray(audioBufferInfo.size)
+                                }
+                                outputBuffer.position(0)
+                                outputBuffer.get(mAudioOutTempBuf, 0, audioBufferInfo.size)
+                                outputBuffer.clear()
+                                audioTrack.write(mAudioOutTempBuf, 0, audioBufferInfo.size)
+                            }
+                        }
+                        // 释放资源
+                        audioDecoder.releaseOutputBuffer(outputBufferIndex, false)
+                    }
+                }
+            }
+
+            // 结尾了
+            if (audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                break
+            }
+        }
+
+        // 释放MediaCode 和AudioTrack
+        audioDecoder.stop()
+        audioDecoder.release()
+        audioExtractor.release()
+        audioTrack.stop()
+        audioTrack.release()
     }
 
 
@@ -78,7 +181,7 @@ class VideoDecoder(val surface: Surface, val path: String) {
                 eos = decodeFrame(videoDecoder, videoExtractor)
             }
             val bufferInfo = MediaCodec.BufferInfo()
-            val outputIndex = videoDecoder.dequeueOutputBuffer(bufferInfo, -1)
+            val outputIndex = videoDecoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
             when (outputIndex) {
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
                 MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED,
@@ -127,5 +230,4 @@ class VideoDecoder(val surface: Surface, val path: String) {
         }
         return eos
     }
-
 }

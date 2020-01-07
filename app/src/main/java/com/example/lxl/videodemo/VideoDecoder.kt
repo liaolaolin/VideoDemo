@@ -9,6 +9,8 @@ class VideoDecoder(val surface: Surface, val path: String) {
 
     lateinit var videoExtractor: MediaExtractor
     lateinit var videoDecoder: MediaCodec
+    lateinit var audioExtractor: MediaExtractor
+    lateinit var audioDecoder: MediaCodec
 
     init {
         initVideo()
@@ -35,7 +37,20 @@ class VideoDecoder(val surface: Surface, val path: String) {
     }
 
     private fun initAudio() {
+        try {
+            audioExtractor = MediaExtractor()
+            audioExtractor.setDataSource(path)
+            for (i in 0..(audioExtractor.trackCount - 1)) {
+                val mediaFormat = audioExtractor.getTrackFormat(i)
+                val mime = mediaFormat.getString(MediaFormat.KEY_MIME)
+                if (mime.startsWith("audio/")) {
+                    audioExtractor.selectTrack(i)
 
+                }
+            }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
     }
 
     fun start() {

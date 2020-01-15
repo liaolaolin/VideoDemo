@@ -117,7 +117,6 @@ class VideoDecoder(val surface: Surface, val path: String) {
         var playEnd = false
         var eos = false
         val startMillis = System.currentTimeMillis()
-        var outputBuffers = audioDecoder.getOutputBuffers()
         while (!playEnd) {
             // 解码
             if (!eos) {
@@ -127,16 +126,14 @@ class VideoDecoder(val surface: Surface, val path: String) {
             val outputBufferIndex = audioDecoder.dequeueOutputBuffer(audioBufferInfo, TIMEOUT_US) // 这里不能用-1，有些视频是需要积累几帧才能解出数据的，妈蛋
             when (outputBufferIndex) {
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
-                MediaCodec.INFO_TRY_AGAIN_LATER -> { }
+                MediaCodec.INFO_TRY_AGAIN_LATER,
                 MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> {
-                    outputBuffers = audioDecoder.getOutputBuffers()
-                    Log.i(TAG, "INFO_OUTPUT_BUFFERS_CHANGED")
                 }
                 else -> {
                     if (audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                         playEnd = true
                     } else {
-                        outputBuffers[outputBufferIndex]?.let { outputBuffer ->
+                        audioDecoder.getOutputBuffer(outputBufferIndex)?.let { outputBuffer ->
                             // 延时解码，跟视频时间同步
                             delay(audioBufferInfo, startMillis)
                             // 如果解码成功，则将解码后的音频PCM数据用AudioTrack播放出来
@@ -186,7 +183,6 @@ class VideoDecoder(val surface: Surface, val path: String) {
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
                 MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED,
                 MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    // log
                 }
                 else -> {
                     if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {

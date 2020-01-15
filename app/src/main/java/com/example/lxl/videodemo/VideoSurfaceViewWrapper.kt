@@ -9,6 +9,8 @@ class VideoSurfaceViewWrapper(val videoView: SurfaceView) {
     lateinit var decoder: VideoDecoder
     lateinit var surface: Surface
 
+    lateinit var asyncDecoder: AsyncVideoDecoder
+
     init {
         // to get surface
         videoView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -32,8 +34,10 @@ class VideoSurfaceViewWrapper(val videoView: SurfaceView) {
 
     fun start(videoPath: String) {
         Thread {
-            decoder = VideoDecoder(surface, videoPath)
-            decoder.start()
+//            decoder = VideoDecoder(surface, videoPath)
+//            decoder.start()
+            asyncDecoder = AsyncVideoDecoder(surface, videoPath)
+            asyncDecoder.start()
         }.start()
 
     }

@@ -35,5 +35,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        findViewById<View>(R.id.jump_to_camera).setOnClickListener {
+            val intent = Intent(this@MainActivity, RecordActivity::class.java)
+            startActivity(intent)
+        }
+
     }
 }
